@@ -11,5 +11,6 @@ libraryDependencies ++= Seq(
   "com.typesafe.slick" %% "slick" % "3.1.1",
   "org.xerial" % "sqlite-jdbc" % "3.8.11.2",
   "com.typesafe.slick" %% "slick-hikaricp" % "3.1.1",
-  "com.elderresearch" %% "ssc" % "0.2.0"
+  "com.elderresearch" %% "ssc" % "0.2.0",
+  "org.scalatest" %% "scalatest" % "3.0.0" % "test"
 )
