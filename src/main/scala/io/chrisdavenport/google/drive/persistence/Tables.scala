@@ -12,17 +12,15 @@ trait Tables {
   case class GoogleFile(
                        id: String,
                        name: String,
-                       mimeType: String,
-                       extension: Option[String]
+                       mimeType: String
                        )
 
-  class GoogleFiles(_tableTag: Tag) extends Table[GoogleFile](_tableTag, "FILES"){
-    def * = (id, name, mimeType, extension) <> (GoogleFile.tupled, GoogleFile.unapply)
+  class GoogleFiles(_tableTag: Tag) extends Table[GoogleFile](_tableTag, "files"){
+    def * = (id, name, mimeType) <> (GoogleFile.tupled, GoogleFile.unapply)
 
-    val id: Rep[String] = column[String]("ID", O.PrimaryKey)
-    val name: Rep[String] = column[String]("NAME")
-    val mimeType: Rep[String] = column[String]("MIME_TYPE")
-    val extension: Rep[Option[String]] = column[Option[String]]("EXTENSION")
+    val id: Rep[String] = column[String]("id", O.PrimaryKey)
+    val name: Rep[String] = column[String]("name")
+    val mimeType: Rep[String] = column[String]("mime_type")
   }
 
   lazy val googleFiles = new TableQuery(tag => new GoogleFiles(tag))
@@ -32,13 +30,13 @@ trait Tables {
                      parentId: String
                    )
 
-  class GoogleParents(_tableTag: Tag) extends Table[GoogleParent](_tableTag, "PARENTS"){
+  class GoogleParents(_tableTag: Tag) extends Table[GoogleParent](_tableTag, "parents"){
     def * = (childID, parentID) <> (GoogleParent.tupled, GoogleParent.unapply)
-    val childID: Rep[String] = column[String]("CHILD_ID")
-    val parentID: Rep[String] = column[String]("PARENT_ID")
+    val childID: Rep[String] = column[String]("child_id")
+    val parentID: Rep[String] = column[String]("parent_id")
 
-    val pk = primaryKey("PK_PARENTS", (childID, parentID))
-    def childFile = foreignKey("CHILD_FK", childID, googleFiles)(_.id, onUpdate = ForeignKeyAction.Restrict, onDelete = ForeignKeyAction.Cascade)
+    val pk = primaryKey("pk_parents", (childID, parentID))
+    def childFile = foreignKey("fk_child", childID, googleFiles)(_.id, onUpdate = ForeignKeyAction.Restrict, onDelete = ForeignKeyAction.Cascade)
   }
 
   lazy val googleParents = new TableQuery(tag => new GoogleParents(tag))

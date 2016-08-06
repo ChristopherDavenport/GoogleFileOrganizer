@@ -18,18 +18,16 @@ import scala.concurrent.ExecutionContext.Implicits.global
   */
 object SimpleFileTracker extends App with Tables {
 
-  val dbConfig: DatabaseConfig[JdbcProfile] = DatabaseConfig.forConfig("sqlite")
+  val dbConfig: DatabaseConfig[JdbcProfile] = DatabaseConfig.forConfig("postgres")
   val profile = dbConfig.driver
   implicit val db = dbConfig.db
   import dbConfig.driver.api._
 
-//  val f1 = for {
-//    _ <- db.run(googleFiles.schema.create)
-//    _ <- db.run(googleParents.schema.create)
-//  } yield ()
-//
-//
-//  val a1 = Await.result(f1, 10.seconds)
+//   Await.result(db.run(googleFiles.schema.create), 10.seconds)
+//   Await.result(db.run(googleParents.schema.create), 10.seconds)
+
+
+
 //  Await.result(db.run(schema.create), 10.seconds)
 
   object DriveConfig extends SSConfig("google")
@@ -46,97 +44,111 @@ object SimpleFileTracker extends App with Tables {
   val files = drive.files.list()
 
   val seq = files
-    .map(f =>
-      for {
-        id <- f.id
-      } yield GoogleFile(id, f.name, f.mimeType, f.extension)
-    )
-    .map(_.map(insertOrUpdateFiles))
-
-  seq.foreach(println)
-
-  val f3 = db.run(googleFiles.result)
-    .map(_.foreach(println))
-
-  Await.result(f3, 10.seconds)
+    .map(f => GoogleFile(f.id.get, f.name, f.mimeType))
+    .map(insertOrUpdateFiles)
 
   val parentSeq = files
     .map(getParentsRecursive(_, drive))
     .map(insertOrDeleteParents)
 
-  println(s"Total Rows Changed - ${parentSeq.sum}")
-
-  def insertOrUpdateFiles(f: GoogleFile)(implicit db: JdbcProfile#Backend#Database, ec: ExecutionContext): Int = {
+  def insertOrUpdateFiles(f: GoogleFile)(implicit db: JdbcProfile#Backend#Database, ec: ExecutionContext): Future[Int] = {
     val qTotal = googleFiles.filter(r => r.id === f.id && r.name === f.name && r.mimeType === f.mimeType).exists.result
-    Await.result(db.run(qTotal), 10.seconds) match {
-      case true => 0
+    val q = googleFiles.filter(_.id === f.id).exists.result
+    val existsExactly = for { existsTotal <- db.run(qTotal) } yield existsTotal
+
+    existsExactly.flatMap{
+      case true => Future.successful(0)
       case false =>
-        val q = googleFiles.filter(_.id === f.id).exists.result
-        Await.result(db.run(q), 10.seconds) match {
+        val pkExists = for { exists <- db.run(q) } yield exists
+        pkExists.flatMap{
           case true =>
-            val a = for {
-              rec <- googleFiles if rec.id === f.id
-            } yield (rec.name, rec.mimeType, rec.extension)
-            val action = a.update((f.name, f.mimeType, f.extension ))
-            Await.result(db.run(action), 10.seconds)
+            val updateQ = for {rec <- googleFiles if rec.id === f.id} yield (rec.name, rec.mimeType)
+            val action = updateQ.update(f.name, f.mimeType)
+            db.run(action)
           case false =>
-            Await.result(db.run(googleFiles += f), 10.seconds)
+            db.run(googleFiles += f)
         }
     }
   }
 
-  def getParentsRecursive(file: edu.eckerd.google.api.services.drive.models.File, drive: Drive, iter: Int = 0): edu.eckerd.google.api.services.drive.models.File = {
-//    Thread.sleep(15)
+  def getParentsRecursive(file: edu.eckerd.google.api.services.drive.models.File,
+                          drive: Drive,
+                          iter: Int = 0,
+                          timeout: Int = 100): edu.eckerd.google.api.services.drive.models.File = {
+    val r = new scala.util.Random()
     val t = Try(drive.files.getParents(file))
       .recoverWith {
-        case rateLimit: GoogleJsonResponseException if rateLimit.getDetails.getMessage.contains("Rate Limit Exceeded") && iter < 10 =>
-          Thread.sleep(100)
+        case rateLimit: GoogleJsonResponseException if rateLimit.getDetails.getMessage.contains("Rate Limit Exceeded") =>
+          Thread.sleep(timeout)
           if (iter > 0) println(s"Recursive Loop Entered For ${file.name} - Iter - $iter")
-          Try(getParentsRecursive(file, drive, iter + 1))
+          Try(getParentsRecursive(file, drive, iter + 1, timeout + r.nextInt(100) ))
       }
     t.get
   }
 
   def insertOrDeleteParents(file: edu.eckerd.google.api.services.drive.models.File)
-                           (implicit db: JdbcProfile#Backend#Database, ec: ExecutionContext): Int = {
+                           (implicit db: JdbcProfile#Backend#Database, ec: ExecutionContext): Future[Int] = {
     val optParentShift = for {
       id <- file.id
       parents <- file.parentIds if parents.nonEmpty
     } yield {
-      val dbParents = Await.result(
-        db.run(
-          googleParents.filter(_.childID === id).map(_.parentID).result
-        ),
-        10.seconds
+      val dbParentsF = db.run(
+        googleParents.filter(_.childID === id).map(_.parentID).result
       )
-      val dbParentsSet = dbParents.toSet
-      val googleParentsSet = parents.toSet
 
-     val create = googleParentsSet.diff(dbParentsSet)
-       .toList
-       .map { parentId =>
-         val creatingParent = GoogleParent(id, parentId)
-         println(s"Creating $creatingParent")
-         Await.result(db.run(googleParents += creatingParent), 10.seconds)
-       }
+      val createListF = for {
+        dbParents <- dbParentsF
+      } yield {
+        val dbParentsSet = dbParents.toSet
+        val googleParentsSet = parents.toSet
+        googleParentsSet.diff(dbParentsSet).toList
+      }
 
-      val delete = dbParentsSet.diff(googleParentsSet)
-        .toList
-        .map { parentID =>
-          val removingParent = GoogleParent(id, parentID)
-          println(s"Removing - $removingParent")
-          Await.result(
+      val deleteListF = for {
+        dbParents <- dbParentsF
+      } yield {
+        val dbParentsSet = dbParents.toSet
+        val googleParentsSet = parents.toSet
+        dbParentsSet.diff(googleParentsSet).toList
+      }
+
+      val deleteItems = for {
+        createList <- createListF
+        result <- Future.sequence{
+          for {
+            parentId <- createList
+          } yield db.run(googleParents += GoogleParent(id, parentId))
+        }
+      } yield result
+
+      val createItems = for {
+        deleteList <- deleteListF
+        result <- Future.sequence{
+          for {
+            parentId <- deleteList
+          } yield {
+            val removingParent = GoogleParent(id, parentId)
             db.run(
               googleParents.filter(rec =>
                 rec.childID === removingParent.childId && rec.parentID === removingParent.parentId).delete
-            ),
-            10.seconds
-          )
+            )
+          }
         }
+      } yield result
 
-      create.sum + delete.sum
+      for {
+        created <- createItems
+        deleted <- deleteItems
+      } yield {
+        created.sum + deleted.sum
+      }
     }
-    optParentShift.getOrElse(0)
+    optParentShift.getOrElse(Future.successful(0))
   }
+
+  val filesMade = Await.result(Future.sequence(seq), Duration.Inf )
+  println(s"${filesMade.sum} files added to database")
+  val filesDeleted = Await.result(Future.sequence(parentSeq), Duration.Inf )
+  println(s"${filesDeleted.sum} files deleted from database")
 
 }

@@ -12,5 +12,6 @@ libraryDependencies ++= Seq(
   "org.xerial" % "sqlite-jdbc" % "3.8.11.2",
   "com.typesafe.slick" %% "slick-hikaricp" % "3.1.1",
   "com.elderresearch" %% "ssc" % "0.2.0",
-  "org.scalatest" %% "scalatest" % "3.0.0" % "test"
+  "org.scalatest" %% "scalatest" % "3.0.0" % "test",
+  "org.postgresql" % "postgresql" % "9.4.1209"
 )
