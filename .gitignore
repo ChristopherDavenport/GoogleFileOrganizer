@@ -1,4 +1,4 @@
-db.sqlite
-db.sqlite-journal
 target
 .idea/
+*.log
+Sandbox.scala

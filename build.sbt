@@ -13,5 +13,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.slick" %% "slick-hikaricp" % "3.1.1",
   "com.elderresearch" %% "ssc" % "0.2.0",
   "org.scalatest" %% "scalatest" % "3.0.0" % "test",
-  "org.postgresql" % "postgresql" % "9.4.1209"
+  "org.postgresql" % "postgresql" % "9.4.1209",
+  "ch.qos.logback" % "logback-classic" % "1.1.7",
+  "com.typesafe.scala-logging" %% "scala-logging" % "3.4.0"
 )
